@@ -21,6 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 import os
+import json
 from dotenv import load_dotenv
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -41,8 +42,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'apps.jobs',
-    'apps.scheduler',
+    'jobs',
+    'scheduler',
 ]
 
 MIDDLEWARE = [
@@ -122,6 +123,13 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
-CELERY_ACCEPT_CONTENT = os.getenv("CELERY_ACCEPT_CONTENT")
-CELERY_TASK_SERIALIZER = os.getenv("CELERY_TASK_SERIALIZER")
+
+
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+
+CELERY_ACCEPT_CONTENT = json.loads(os.getenv("CELERY_ACCEPT_CONTENT", '["json"]'))
+
+CELERY_TASK_SERIALIZER = os.getenv("CELERY_TASK_SERIALIZER", "json")
+CELERY_RESULT_SERIALIZER = os.getenv("CELERY_RESULT_SERIALIZER", "json")
+
+CELERY_TIMEZONE = os.getenv("CELERY_TIMEZONE", "UTC")

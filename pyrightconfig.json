@@ -1,0 +1,7 @@
+{
+    "typeCheckingMode": "off",
+  
+    "reportAttributeAccessIssue": false,
+    "reportGeneralTypeIssues": false,
+    "reportArgumentType": false
+  }
