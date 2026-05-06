@@ -12,7 +12,7 @@ class Job(models.Model):
         SUCCESS = "SUCCESS"
         FAILED = "FAILED"
     
-    id = models.UUIDField(primary_key=True,default=uuid.uuid4(),editable=False)
+    id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
     name=models.CharField(max_length=255)
     payload = models.JSONField()
     status=models.CharField(

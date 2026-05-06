@@ -125,7 +125,7 @@ STATIC_URL = 'static/'
 
 
 
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = "redis://localhost:6380/0"
 
 CELERY_ACCEPT_CONTENT = json.loads(os.getenv("CELERY_ACCEPT_CONTENT", '["json"]'))
 
