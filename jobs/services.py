@@ -1,4 +1,4 @@
-from .models import Job
+from .models import Job , DeadLetterJob
 from .tasks import execute_job
 
 
@@ -19,3 +19,12 @@ def enqueue_job(job: Job):
     job.save(update_fields=["status"])
 
     execute_job.delay(job.id)   
+
+def move_to_dlq(job,error_message):
+
+    DeadLetterJob.objects.create(
+        original_job_id=job.id,
+        name=job.name,
+        payload=job.payload,
+        error=error_message
+    )

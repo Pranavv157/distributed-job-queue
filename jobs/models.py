@@ -18,7 +18,8 @@ class Job(models.Model):
     status=models.CharField(
         max_length=20,
         choices=Status.choices,
-        default=Status.PENDING
+        default=Status.PENDING,
+        db_index=True #because of frequent query for status
     )
 
     retries = models.IntegerField(default=0)
@@ -31,6 +32,18 @@ class Job(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+class DeadLetterJob(models.Model):
+
+    original_job_id = models.UUIDField()
+
+    name = models.CharField(max_length=255)
+
+    payload = models.JSONField()
+
+    error = models.TextField()
+    last_retry_at = models.DateTimeField(null=True, blank=True)
+    failed_at = models.DateTimeField(auto_now_add=True)
 
 
 
