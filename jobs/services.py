@@ -1,5 +1,4 @@
 from .models import Job , DeadLetterJob
-from .tasks import execute_job
 
 
 def create_job(name, payload):
@@ -15,6 +14,8 @@ def create_job(name, payload):
 
 
 def enqueue_job(job: Job):
+
+    from .tasks import execute_job
     job.status = Job.Status.QUEUED
     job.save(update_fields=["status"])
 

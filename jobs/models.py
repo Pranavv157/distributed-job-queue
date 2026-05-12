@@ -3,6 +3,9 @@ from django.db import models
 import uuid
 # Create your models here.
 
+from django.db import models
+import uuid
+
 class Job(models.Model):
 
     class Status(models.TextChoices):
@@ -11,28 +14,40 @@ class Job(models.Model):
         RUNNING = "RUNNING"
         SUCCESS = "SUCCESS"
         FAILED = "FAILED"
-    
-    id = models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
-    name=models.CharField(max_length=255)
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+
+    name = models.CharField(max_length=255)
+
     payload = models.JSONField()
-    status=models.CharField(
+
+    status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.PENDING,
-        db_index=True #because of frequent query for status
+        db_index=True
     )
 
     retries = models.IntegerField(default=0)
-    max_retries=models.IntegerField(default=3)
 
-    result=models.JSONField(null=True,blank=True)
+    max_retries = models.IntegerField(default=3)
+
+    result = models.JSONField(null=True, blank=True)
+
     error = models.TextField(null=True, blank=True)
 
-    scheduled_at = models.DateField(null=True,blank=True)
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    scheduled_at = models.DateField(null=True, blank=True)
 
+    started_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+    
 class DeadLetterJob(models.Model):
 
     original_job_id = models.UUIDField()

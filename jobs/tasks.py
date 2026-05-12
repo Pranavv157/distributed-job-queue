@@ -4,6 +4,8 @@ from django.db.models import F
 from config.lock import acquire_lock, release_lock
 from jobs.models import Job
 from .services import move_to_dlq
+from django.utils import timezone
+from datetime import timedelta
 import time
 
 
@@ -39,7 +41,8 @@ def execute_job(self, job_id):
 
             # mark running
             job.status = Job.Status.RUNNING
-            job.save(update_fields=["status"])
+            job.started_at=timezone.now()
+            job.save(update_fields=["status","started_at"])
 
         # simulate long-running task
         time.sleep(10)
@@ -80,3 +83,20 @@ def execute_job(self, job_id):
     finally:
         # always release distributed lock
         release_lock(lock_key)
+
+
+@shared_task
+def recover_stale_jobs():
+
+    timeout=timezone.now() - timedelta(minutes=2)
+
+    stale_jobs= Job.objects.filter(
+        status=Job.Status.RUNNING,
+        started_at__lt=timeout
+    )
+
+    for job in stale_jobs:
+        job.status =Job.Status.QUEUED
+        job.save(update_fields=["status"])
+
+        execute_job.delay(str(job.id))
