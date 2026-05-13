@@ -33,7 +33,7 @@ Django Service Layer
     ↓
 PostgreSQL (source of truth)
     ↓
-Celery Queue
+Redis Queue
     ↓
 Celery Workers
     ↓
