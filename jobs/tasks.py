@@ -41,11 +41,17 @@ def execute_job(self, job_id):
 
             # mark running
             job.status = Job.Status.RUNNING
-            job.started_at=timezone.now()
-            job.save(update_fields=["status","started_at"])
+            job.started_at= timezone.now()
+            job.last_heartbeat_at = timezone.now()
+            job.save(update_fields=["status","started_at","last_heartbeat_at"])
 
         # simulate long-running task
-        time.sleep(10)
+        for _ in range(30):
+            time.sleep(2)
+            Job.objects.filter(id=job_id).update(
+                last_heartbeat_at=timezone.now()
+            )
+            print(f"heartbeat updated for {job_id}")
 
         # actual business logic
         number = job.payload.get("number", 0)
@@ -55,6 +61,8 @@ def execute_job(self, job_id):
         Job.objects.filter(id=job_id).update(
             status=Job.Status.SUCCESS,
             result={"result": result},
+            started_at=None ,
+            last_heartbeat_at=None,
         )
 
         return result
@@ -74,6 +82,8 @@ def execute_job(self, job_id):
         if job.retries >= job.max_retries:
 
             job.status = Job.Status.FAILED
+            job.started_at=None
+            job.last_heartbeat_at=None
             job.save(update_fields=["status"])
 
             move_to_dlq(job, str(e))
@@ -88,15 +98,21 @@ def execute_job(self, job_id):
 @shared_task
 def recover_stale_jobs():
 
-    timeout=timezone.now() - timedelta(minutes=2)
+    timeout = timezone.now() - timedelta(minutes=1)
 
-    stale_jobs= Job.objects.filter(
+    stale_jobs = Job.objects.filter(
         status=Job.Status.RUNNING,
-        started_at__lt=timeout
+        last_heartbeat_at__lt=timeout
     )
 
     for job in stale_jobs:
-        job.status =Job.Status.QUEUED
-        job.save(update_fields=["status"])
 
-        execute_job.delay(str(job.id))
+        updated = Job.objects.filter(
+            id=job.id,
+            status=Job.Status.RUNNING
+        ).update(
+            status=Job.Status.QUEUED
+        )
+
+        if updated:
+            execute_job.delay(str(job.id))

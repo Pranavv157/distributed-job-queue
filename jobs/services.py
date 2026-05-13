@@ -19,7 +19,8 @@ def enqueue_job(job: Job):
     job.status = Job.Status.QUEUED
     job.save(update_fields=["status"])
 
-    execute_job.delay(job.id)   
+    for _ in range(10):
+        execute_job.delay(job.id) 
 
 def move_to_dlq(job,error_message):
 
