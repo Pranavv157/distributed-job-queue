@@ -19,10 +19,19 @@ def enqueue_job(job: Job):
     job.status = Job.Status.QUEUED
     job.save(update_fields=["status"])
 
-    for _ in range(10):
-        execute_job.delay(job.id) 
+    
+    execute_job.delay(job.id) 
 
-def move_to_dlq(job,error_message):
+
+
+
+def move_to_dlq(job, error_message):
+
+    # prevent duplicate DLQ entries
+    if DeadLetterJob.objects.filter(
+        original_job_id=job.id
+    ).exists():
+        return
 
     DeadLetterJob.objects.create(
         original_job_id=job.id,
