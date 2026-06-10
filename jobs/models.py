@@ -49,6 +49,10 @@ class Job(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     last_heartbeat_at = models.DateTimeField(null=True,blank=True)
+
+    lease_owner = models.CharField(max_length=255, null=True, blank=True)
+
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
     
 class DeadLetterJob(models.Model):
 

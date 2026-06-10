@@ -4,3 +4,7 @@ class RetryableError(Exception):
 
 class PermanentError(Exception):
     pass
+
+
+class LeaseLostException(Exception):
+    pass

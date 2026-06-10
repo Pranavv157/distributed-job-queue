@@ -1,5 +1,3 @@
-# tasks.py
-
 from celery import shared_task
 from django.db import transaction
 from django.db.models import F
@@ -11,9 +9,15 @@ import time
 import logging
 
 from config.lock import acquire_lock, release_lock
+from config.worker_identity import WORKER_ID
+
 from jobs.models import Job
 from .services import move_to_dlq
-from .exceptions import PermanentError
+from .lease import assert_lease_owner
+from .exceptions import (
+    PermanentError,
+    LeaseLostException,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +51,16 @@ def execute_job(job_id):
             now = timezone.now()
 
             job.status = Job.Status.RUNNING
+            job.lease_owner = WORKER_ID
+            job.lease_expires_at = now + timedelta(minutes=3)
             job.started_at = now
             job.last_heartbeat_at = now
 
             job.save(
                 update_fields=[
                     "status",
+                    "lease_owner",
+                    "lease_expires_at",
                     "started_at",
                     "last_heartbeat_at",
                 ]
@@ -60,23 +68,38 @@ def execute_job(job_id):
 
         logger.info(f"Started processing job {job_id}")
 
-        
         # simulate long-running task + heartbeat
-         
 
         for _ in range(30):
 
             time.sleep(2)
 
-            Job.objects.filter(id=job_id).update(
-                last_heartbeat_at=timezone.now()
+            assert_lease_owner(
+                job_id,
+                WORKER_ID
             )
+
+            updated = Job.objects.filter(
+                id=job_id,
+                lease_owner=WORKER_ID
+            ).update(
+                last_heartbeat_at=timezone.now(),
+                lease_expires_at=timezone.now() + timedelta(minutes=1)
+            )
+
+            if not updated:
+                raise LeaseLostException()
 
             logger.info(f"Heartbeat updated for {job_id}")
 
-         
         # business logic
-         
+
+        assert_lease_owner(
+            job_id,
+            WORKER_ID
+        )
+
+        job.refresh_from_db()
 
         number = job.payload.get("number", 0)
 
@@ -90,29 +113,51 @@ def execute_job(job_id):
 
         result = number * 2
 
-         
         # transition RUNNING -> SUCCESS
-         
 
         with transaction.atomic():
 
-            Job.objects.filter(id=job_id).update(
+            assert_lease_owner(
+                job_id,
+                WORKER_ID
+            )
+
+            Job.objects.filter(
+                id=job_id
+            ).update(
                 status=Job.Status.SUCCESS,
                 result={"result": result},
                 retries=0,
                 error=None,
                 started_at=None,
                 last_heartbeat_at=None,
+                lease_owner=None,
+                lease_expires_at=None,
             )
 
-        logger.info(f"Job {job_id} completed successfully")
+        logger.info(
+            f"Job {job_id} completed successfully"
+        )
 
         return result
+
+    except LeaseLostException as e:
+
+        logger.error(
+            f"Lease lost for job {job_id}: {e}"
+        )
+
+        return {"status": "lease_lost"}
 
     except PermanentError as e:
 
         logger.error(
             f"Permanent failure for job {job_id}: {e}"
+        )
+
+        assert_lease_owner(
+            job_id,
+            WORKER_ID
         )
 
         job = Job.objects.get(id=job_id)
@@ -124,6 +169,8 @@ def execute_job(job_id):
         job.result = None
         job.started_at = None
         job.last_heartbeat_at = None
+        job.lease_owner = None
+        job.lease_expires_at = None
 
         job.save(
             update_fields=[
@@ -132,11 +179,17 @@ def execute_job(job_id):
                 "result",
                 "started_at",
                 "last_heartbeat_at",
+                "lease_owner",
+                "lease_expires_at",
             ]
         )
 
         # move once to DLQ
-        move_to_dlq(job, str(e))
+
+        move_to_dlq(
+            job,
+            str(e)
+        )
 
         return {"status": "failed_permanently"}
 
@@ -147,24 +200,32 @@ def execute_job(job_id):
         )
 
         # atomic retry increment
-        Job.objects.filter(id=job_id).update(
+
+        Job.objects.filter(
+            id=job_id
+        ).update(
             retries=F("retries") + 1,
             error=str(e),
         )
 
         job = Job.objects.get(id=job_id)
 
-         
         # retries exhausted -> DLQ
         # transition RUNNING -> FAILED
-         
 
         if job.retries >= job.max_retries:
+
+            assert_lease_owner(
+                job_id,
+                WORKER_ID
+            )
 
             job.status = Job.Status.FAILED
             job.result = None
             job.started_at = None
             job.last_heartbeat_at = None
+            job.lease_owner = None
+            job.lease_expires_at = None
 
             job.save(
                 update_fields=[
@@ -172,6 +233,8 @@ def execute_job(job_id):
                     "result",
                     "started_at",
                     "last_heartbeat_at",
+                    "lease_owner",
+                    "lease_expires_at",
                 ]
             )
 
@@ -179,14 +242,20 @@ def execute_job(job_id):
                 f"Job {job.id} exhausted retries. Moving to DLQ."
             )
 
-            move_to_dlq(job, str(e))
+            move_to_dlq(
+                job,
+                str(e)
+            )
 
             return {"status": "moved_to_dlq"}
 
-        
         # transition RUNNING -> QUEUED
         # schedule retry with exponential backoff + jitter
-    
+
+        assert_lease_owner(
+            job_id,
+            WORKER_ID
+        )
 
         retry_delay = (
             2 ** job.retries
@@ -196,6 +265,8 @@ def execute_job(job_id):
         job.error = None
         job.started_at = None
         job.last_heartbeat_at = None
+        job.lease_owner = None
+        job.lease_expires_at = None
 
         job.save(
             update_fields=[
@@ -203,6 +274,8 @@ def execute_job(job_id):
                 "error",
                 "started_at",
                 "last_heartbeat_at",
+                "lease_owner",
+                "lease_expires_at",
             ]
         )
 
@@ -228,23 +301,21 @@ def execute_job(job_id):
 @shared_task
 def recover_stale_jobs():
 
-    # jobs that stopped sending heartbeat
-    timeout = timezone.now() - timedelta(minutes=1)
-
-    stale_jobs = list(
+    expired_jobs = list(
         Job.objects.filter(
             status=Job.Status.RUNNING,
-            last_heartbeat_at__lt=timeout
+            lease_expires_at__lt=timezone.now()
         )
     )
 
     logger.warning(
-        f"Found {len(stale_jobs)} stale jobs"
+        f"Found {len(expired_jobs)} expired jobs"
     )
 
-    for job in stale_jobs:
+    for job in expired_jobs:
 
         # transition RUNNING -> QUEUED
+
         updated = Job.objects.filter(
             id=job.id,
             status=Job.Status.RUNNING
@@ -252,12 +323,16 @@ def recover_stale_jobs():
             status=Job.Status.QUEUED,
             started_at=None,
             last_heartbeat_at=None,
+            lease_owner=None,
+            lease_expires_at=None,
         )
 
         if updated:
 
             logger.warning(
-                f"Recovered stale job {job.id}"
+                f"Recovered expired job {job.id}"
             )
 
-            execute_job.delay(str(job.id))
+            execute_job.delay(
+                str(job.id)
+            )
