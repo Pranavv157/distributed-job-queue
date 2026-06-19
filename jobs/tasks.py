@@ -18,6 +18,8 @@ from .exceptions import (
     PermanentError,
     LeaseLostException,
 )
+from .publisher import publish
+from jobs.models import OutboxEvent
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +137,15 @@ def execute_job(job_id):
                 lease_expires_at=None,
             )
 
+            OutboxEvent.objects.create(
+                aggregate_id=str(job.id),
+                event_type="job_completed",
+                payload={
+                    "job_id":str(job.id),
+                    "result":result
+                }
+
+            )
         logger.info(
             f"Job {job_id} completed successfully"
         )
@@ -336,3 +347,35 @@ def recover_stale_jobs():
             execute_job.delay(
                 str(job.id)
             )
+
+@shared_task
+def process_job_completed_event(payload):
+
+    logger.info(
+        f"Processing event: {payload}"
+    )
+
+
+@shared_task
+def publish_outbox_events():
+
+    events = OutboxEvent.objects.filter(
+        published=False
+    )[:100]
+
+    for event in events:
+
+        try:
+
+            publish(event)
+
+            OutboxEvent.objects.filter(
+                id=event.id,
+                published=False
+            ).update(
+                published=True,
+                published_at=timezone.now()
+            )
+
+        except Exception as e:
+            logger.exception( f"Failed publishing event {event.id}: {e}")
