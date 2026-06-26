@@ -359,9 +359,13 @@ def process_job_completed_event(payload):
 @shared_task
 def publish_outbox_events():
 
-    events = OutboxEvent.objects.filter(
-        published=False
-    )[:100]
+    with transaction.atomic():
+
+        events = list(
+            OutboxEvent.objects
+            .select_for_update(skip_locked=True)
+            .filter(published=False)[:100]
+        )
 
     for event in events:
 
@@ -378,4 +382,7 @@ def publish_outbox_events():
             )
 
         except Exception as e:
-            logger.exception( f"Failed publishing event {event.id}: {e}")
+
+            logger.exception(
+                f"Failed publishing event {event.id}: {e}"
+            )
